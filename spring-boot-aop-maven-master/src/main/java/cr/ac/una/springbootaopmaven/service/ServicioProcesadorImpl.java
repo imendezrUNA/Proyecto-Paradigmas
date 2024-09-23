@@ -21,7 +21,6 @@ public class ServicioProcesadorImpl implements IServicioProcesador {
     public Map<String, Object> generarReporteError() {
         List<String> logs = procesadorLog.lectorArchivoLog();
 
-        // Filtrar y agrupar los errores por tipo
         Map<String, Long> conteoErrores = logs.stream()
                 .filter(line -> line.contains("ERROR"))
                 .collect(Collectors.groupingBy(line -> {
@@ -31,19 +30,16 @@ public class ServicioProcesadorImpl implements IServicioProcesador {
                     return "Otros Errores";
                 }, Collectors.counting()));
 
-        // Encontrar el error más frecuente
         String errorMasFrecuente = conteoErrores.entrySet()
                 .stream()
                 .max(Map.Entry.comparingByValue())
                 .map(Map.Entry::getKey)
                 .orElse("Ninguno");
 
-        // Implementar la lógica para calcular la hora pico de errores
         Map<String, Long> erroresPorHora = logs.stream()
-                .filter(line -> line.contains("ERROR"))  // Filtrar solo líneas con errores
-                .collect(Collectors.groupingBy(this::extraerHora, Collectors.counting()));  // Agrupar por hora
+                .filter(line -> line.contains("ERROR"))
+                .collect(Collectors.groupingBy(this::extraerHora, Collectors.counting()));
 
-        // Encontrar la hora con más errores (hora pico)
         String horaPico = erroresPorHora.entrySet()
                 .stream()
                 .max(Map.Entry.comparingByValue())
@@ -51,9 +47,9 @@ public class ServicioProcesadorImpl implements IServicioProcesador {
                 .orElse("No hay errores");
 
         Map<String, Object> reporte = new HashMap<>();
-        reporte.put("TotalErroresPorTipo", conteoErrores);
-        reporte.put("ErrorMasFrecuente", errorMasFrecuente);
-        reporte.put("HorasPicoErrores", horaPico);  // Hora pico implementada
+        reporte.put("Total Errores Por Tipo", conteoErrores);
+        reporte.put("Error Mas Frecuente", errorMasFrecuente);
+        reporte.put("Horas Pico Errores", horaPico);
 
         return reporte;
     }
@@ -62,47 +58,42 @@ public class ServicioProcesadorImpl implements IServicioProcesador {
     public Map<String, Object> generarRespuestaTiempoReporte() {
         List<String> logs = procesadorLog.lectorArchivoLog();
 
-        // Filtrar las líneas que contienen "Tiempo de respuesta"
         List<Long> tiempos = logs.stream()
                 .filter(line -> line.contains("Tiempo de respuesta"))
                 .map(line -> {
                     Pattern pattern = Pattern.compile("Tiempo de respuesta para el método .*: (\\d+) ms");
                     Matcher matcher = pattern.matcher(line);
                     if (matcher.find()) {
-                        return Long.parseLong(matcher.group(1));  // Extraer el tiempo en milisegundos
+                        return Long.parseLong(matcher.group(1));
                     } else {
-                        return 0L;  // Si no se encuentra el número, usar 0 como valor por defecto
+                        return 0L;
                     }
                 })
-                .filter(tiempo -> tiempo > 0)  // Filtrar tiempos inválidos (cero)
+                .filter(tiempo -> tiempo > 0)
                 .collect(Collectors.toList());
 
         if (tiempos.isEmpty()) {
-            // Retornar reporte vacío si no se encontraron tiempos
             return Map.of(
-                    "PromedioRespuesta", 0,
-                    "TiempoMinimo", 0,
-                    "TiempoMaximo", 0,
-                    "MedianaTiempoRespuesta", 0,
+                    "Promedio Respuesta", 0,
+                    "Tiempo Minimo", 0,
+                    "Tiempo Maximo", 0,
+                    "Mediana Tiempo Respuesta", 0,
                     "Outliers", Collections.emptyList()
             );
         }
 
-        // Calcular promedio, mínimo, máximo, y mediana de los tiempos
         double promedio = tiempos.stream().mapToLong(Long::longValue).average().orElse(0);
         long minimo = tiempos.stream().mapToLong(Long::longValue).min().orElse(0);
         long maximo = tiempos.stream().mapToLong(Long::longValue).max().orElse(0);
         long mediana = calcularMediana(tiempos);
 
-        // Detectar outliers (solicitudes lentas)
         List<Long> outliers = detectarSolicitudesLentas(tiempos);
 
-        // Crear el reporte
         Map<String, Object> reporte = new HashMap<>();
-        reporte.put("PromedioRespuesta", promedio);
-        reporte.put("TiempoMinimo", minimo);
-        reporte.put("TiempoMaximo", maximo);
-        reporte.put("MedianaTiempoRespuesta", mediana);
+        reporte.put("Promedio Respuesta", promedio);
+        reporte.put("Tiempo Minimo", minimo);
+        reporte.put("Tiempo Maximo", maximo);
+        reporte.put("Mediana Tiempo Respuesta", mediana);
         reporte.put("Outliers", outliers);
 
         return reporte;
@@ -113,40 +104,36 @@ public class ServicioProcesadorImpl implements IServicioProcesador {
     public Map<String, Object> generarReporteEndPoint() {
         List<String> logs = procesadorLog.lectorArchivoLog();
 
-        // Mapa para almacenar el conteo de solicitudes por endpoint y método HTTP
         Map<String, Map<String, Long>> conteoPorMetodoYEndpoint = logs.stream()
                 .filter(line -> line.contains("GET") || line.contains("POST") ||
-                        line.contains("PUT") || line.contains("DELETE"))  // Filtrar solo líneas con solicitudes HTTP
+                        line.contains("PUT") || line.contains("DELETE"))
                 .map(line -> {
-                    // Extraer el método HTTP y el endpoint desde la línea del log
                     String[] parts = line.split(" ");
                     String metodo = "";
                     String endpoint = "";
                     for (int i = 0; i < parts.length; i++) {
                         if (parts[i].equals("GET") || parts[i].equals("POST") || parts[i].equals("PUT") || parts[i].equals("DELETE")) {
-                            metodo = parts[i];  // Método HTTP
+                            metodo = parts[i];
                             if (i + 1 < parts.length) {
-                                endpoint = parts[i + 1];  // El endpoint está justo después del método HTTP
-                                // Limpieza del endpoint: eliminar posibles comillas y caracteres adicionales
+                                endpoint = parts[i + 1];
                                 endpoint = endpoint.replaceAll("[\",]", "").trim();
                             }
                             break;
                         }
                     }
-                    // Imprimir los valores capturados para depurar
+
                     System.out.println("Método: " + metodo + ", Endpoint: " + endpoint);
                     return new AbstractMap.SimpleEntry<>(metodo, endpoint);
                 })
-                .filter(entry -> entry.getValue().startsWith("/api/"))  // Filtrar solo los endpoints que empiezan con /api/
+                .filter(entry -> entry.getValue().startsWith("/api/"))
                 .collect(Collectors.groupingBy(
-                        entry -> entry.getValue(),  // Agrupar por endpoint
+                        entry -> entry.getValue(),
                         Collectors.groupingBy(
-                                Map.Entry::getKey,  // Agrupar por método HTTP dentro del endpoint
-                                Collectors.counting()  // Contar cada combinación método-endpoint
+                                Map.Entry::getKey,
+                                Collectors.counting()
                         )
                 ));
 
-        // Crear una lista de endpoints con el conteo total de peticiones
         Map<String, Long> conteoTotalPorEndpoint = conteoPorMetodoYEndpoint.entrySet()
                 .stream()
                 .collect(Collectors.toMap(
@@ -154,7 +141,6 @@ public class ServicioProcesadorImpl implements IServicioProcesador {
                         entry -> entry.getValue().values().stream().mapToLong(Long::longValue).sum()
                 ));
 
-        // Encontrar el endpoint más y menos utilizado
         String endpointMasUsado = conteoTotalPorEndpoint.entrySet()
                 .stream()
                 .max(Map.Entry.comparingByValue())
@@ -167,12 +153,11 @@ public class ServicioProcesadorImpl implements IServicioProcesador {
                 .map(Map.Entry::getKey)
                 .orElse("Ninguno");
 
-        // Crear el reporte final con conteo por método HTTP y el total
-        Map<String, Object> reporte = new HashMap<>();
-        reporte.put("ConteoPorMetodoYEndpoint", conteoPorMetodoYEndpoint);
-        reporte.put("EndpointMasUsado", endpointMasUsado);
-        reporte.put("EndpointMenosUsado", endpointMenosUsado);
-        reporte.put("ConteoTotalPorEndpoint", conteoTotalPorEndpoint);  // Conteo total para cada endpoint
+         Map<String, Object> reporte = new HashMap<>();
+        reporte.put("Conteo Por Metodo Y Endpoint", conteoPorMetodoYEndpoint);
+        reporte.put("Endpoint Mas Usado", endpointMasUsado);
+        reporte.put("Endpoint Menos Usado", endpointMenosUsado);
+        reporte.put("Conteo Total Por Endpoint", conteoTotalPorEndpoint);
 
         return reporte;
     }
@@ -183,7 +168,6 @@ public class ServicioProcesadorImpl implements IServicioProcesador {
     public Map<String, Object> generarReporteEstatusAplicacion() {
         List<String> logs = procesadorLog.lectorArchivoLog();
 
-        // Contar peticiones procesadas, asegurándonos de que coincida con los logs que contienen tiempos de respuesta
         long totalPeticiones = logs.stream()
                 .filter(line -> line.contains("Tiempo de respuesta para el método"))
                 .count();
@@ -195,17 +179,16 @@ public class ServicioProcesadorImpl implements IServicioProcesador {
 
         // Filtrar y extraer los tiempos de respuesta
         List<Long> tiemposDeRespuesta = logs.stream()
-                .filter(line -> line.contains("Tiempo de respuesta"))  // Filtrar líneas con tiempos de respuesta
+                .filter(line -> line.contains("Tiempo de respuesta"))
                 .map(line -> {
                     try {
-                        // Extraer el tiempo de respuesta en milisegundos
                         Pattern pattern = Pattern.compile("Tiempo de respuesta para el método .*: (\\d+) ms");
                         Matcher matcher = pattern.matcher(line);
                         if (matcher.find()) {
                             return Long.parseLong(matcher.group(1));
                         }
                     } catch (NumberFormatException e) {
-                        // Ignorar si no se puede parsear el número
+
                     }
                     return 0L;
                 })
@@ -220,9 +203,9 @@ public class ServicioProcesadorImpl implements IServicioProcesador {
 
         // Crear el reporte
         Map<String, Object> reporte = new HashMap<>();
-        reporte.put("TotalPeticionesProcesadas", totalPeticiones);
-        reporte.put("TotalErrores", totalErrores);
-        reporte.put("TiempoPromedioRespuesta", tiempoPromedioRespuesta);
+        reporte.put("Total Peticiones Procesadas", totalPeticiones);
+        reporte.put("Total Errores", totalErrores);
+        reporte.put("Tiempo Promedio Respuesta", tiempoPromedioRespuesta);
 
         return reporte;
     }
@@ -241,8 +224,8 @@ public class ServicioProcesadorImpl implements IServicioProcesador {
 
         // Asegúrate de que hay eventos críticos
         Map<String, Object> reporte = new HashMap<>();
-        reporte.put("EventosCriticos", eventosCriticos);
-        reporte.put("CantidadEventosCriticos", cantidadEventosCriticos);
+        reporte.put("Eventos Criticos", eventosCriticos);
+        reporte.put("Cantidad Eventos Criticos", cantidadEventosCriticos);
 
         return reporte;
     }
@@ -250,10 +233,10 @@ public class ServicioProcesadorImpl implements IServicioProcesador {
     private boolean esTiempoRespuestaLargo(String line) {
         if (line.contains("Tiempo de respuesta")) {
             try {
-                long tiempo = Long.parseLong(line.replaceAll("\\D+", "")); // Extraer tiempo numérico
-                return tiempo > 5000;  // Considerar tiempo mayor a 5000ms como crítico
+                long tiempo = Long.parseLong(line.replaceAll("\\D+", ""));
+                return tiempo > 5000;
             } catch (NumberFormatException e) {
-                return false;  // Si no se puede convertir, no lo consideramos crítico
+                return false;
             }
         }
         return false;
@@ -261,18 +244,17 @@ public class ServicioProcesadorImpl implements IServicioProcesador {
 
 
     private String extraerHora(String lineaLog) {
-        // El formato del timestamp en el log es: "2024-09-22T01:53:47.999-06:00"
-        // Extraer la hora "HH" de esa línea.
+
         try {
-            String timestamp = lineaLog.split(" ")[0];  // Obtener la primera parte del log que contiene la fecha y hora
-            return timestamp.substring(11, 13) + ":00";  // Devolver solo la hora "HH:00"
+            String timestamp = lineaLog.split(" ")[0];
+            return timestamp.substring(11, 13) + ":00";
         } catch (Exception e) {
             return "Hora desconocida";
         }
     }
 
     private List<Long> detectarSolicitudesLentas(List<Long> tiempos) {
-        long umbral = 5000;  // Definir un umbral (por ejemplo, 5000 ms)
+        long umbral = 5000;
         return tiempos.stream()
                 .filter(tiempo -> tiempo > umbral)
                 .collect(Collectors.toList());

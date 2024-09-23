@@ -25,7 +25,7 @@ public class PersonaController {
     PersonaRepository personaRepository;
 
     @Autowired
-    IServicioProcesador servicioProcesador; // Inyección del servicio
+    IServicioProcesador servicioProcesador;
 
     @Operation(summary = "Obtener todas las personas", description = "Devuelve una lista con todas las personas en la base de datos.")
     @ApiResponses(value = {
