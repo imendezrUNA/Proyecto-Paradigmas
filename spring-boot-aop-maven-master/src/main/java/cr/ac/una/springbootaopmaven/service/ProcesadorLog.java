@@ -20,10 +20,7 @@ public class ProcesadorLog {
         Path path = Paths.get("app.log");
 
         try (Stream<String> lineas = Files.lines(path)) {
-                return lineas
-                        .filter(line -> line.contains("spring-boot-aop-maven"))
-                        .map(String::toUpperCase)
-                        .collect(Collectors.toList());
+                return lineas.collect(Collectors.toList());
             }catch(IOException e){
                 e.printStackTrace();
                 return List.of();

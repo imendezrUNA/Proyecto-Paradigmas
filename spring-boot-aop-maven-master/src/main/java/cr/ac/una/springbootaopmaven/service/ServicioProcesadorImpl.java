@@ -113,34 +113,66 @@ public class ServicioProcesadorImpl implements IServicioProcesador {
     public Map<String, Object> generarReporteEndPoint() {
         List<String> logs = procesadorLog.lectorArchivoLog();
 
-        Map<String, Long> conteoEndpoints = logs.stream()
-                .filter(line -> line.contains("ENDPOINT"))  // Asegura que la línea contiene un endpoint
+        // Mapa para almacenar el conteo de solicitudes por endpoint y método HTTP
+        Map<String, Map<String, Long>> conteoPorMetodoYEndpoint = logs.stream()
+                .filter(line -> line.contains("GET") || line.contains("POST") ||
+                        line.contains("PUT") || line.contains("DELETE"))  // Filtrar solo líneas con solicitudes HTTP
                 .map(line -> {
+                    // Extraer el método HTTP y el endpoint desde la línea del log
                     String[] parts = line.split(" ");
-                    if (parts.length > 1 && !parts[1].isEmpty()) {
-                        return parts[1];  // Extrae el endpoint si está presente
-                    } else {
-                        return "Indefinido";  // Asigna un valor por defecto si no hay endpoint
+                    String metodo = "";
+                    String endpoint = "";
+                    for (int i = 0; i < parts.length; i++) {
+                        if (parts[i].equals("GET") || parts[i].equals("POST") || parts[i].equals("PUT") || parts[i].equals("DELETE")) {
+                            metodo = parts[i];  // Método HTTP
+                            if (i + 1 < parts.length) {
+                                endpoint = parts[i + 1];  // El endpoint está justo después del método HTTP
+                                // Limpieza del endpoint: eliminar posibles comillas y caracteres adicionales
+                                endpoint = endpoint.replaceAll("[\",]", "").trim();
+                            }
+                            break;
+                        }
                     }
+                    // Imprimir los valores capturados para depurar
+                    System.out.println("Método: " + metodo + ", Endpoint: " + endpoint);
+                    return new AbstractMap.SimpleEntry<>(metodo, endpoint);
                 })
-                .collect(Collectors.groupingBy(endpoint -> endpoint, Collectors.counting()));
+                .filter(entry -> entry.getValue().startsWith("/api/"))  // Filtrar solo los endpoints que empiezan con /api/
+                .collect(Collectors.groupingBy(
+                        entry -> entry.getValue(),  // Agrupar por endpoint
+                        Collectors.groupingBy(
+                                Map.Entry::getKey,  // Agrupar por método HTTP dentro del endpoint
+                                Collectors.counting()  // Contar cada combinación método-endpoint
+                        )
+                ));
 
-        String endpointMasUsado = conteoEndpoints.entrySet()
+        // Crear una lista de endpoints con el conteo total de peticiones
+        Map<String, Long> conteoTotalPorEndpoint = conteoPorMetodoYEndpoint.entrySet()
+                .stream()
+                .collect(Collectors.toMap(
+                        Map.Entry::getKey,
+                        entry -> entry.getValue().values().stream().mapToLong(Long::longValue).sum()
+                ));
+
+        // Encontrar el endpoint más y menos utilizado
+        String endpointMasUsado = conteoTotalPorEndpoint.entrySet()
                 .stream()
                 .max(Map.Entry.comparingByValue())
                 .map(Map.Entry::getKey)
                 .orElse("Ninguno");
 
-        String endpointMenosUsado = conteoEndpoints.entrySet()
+        String endpointMenosUsado = conteoTotalPorEndpoint.entrySet()
                 .stream()
                 .min(Map.Entry.comparingByValue())
                 .map(Map.Entry::getKey)
                 .orElse("Ninguno");
 
+        // Crear el reporte final con conteo por método HTTP y el total
         Map<String, Object> reporte = new HashMap<>();
-        reporte.put("ConteoPorEndpoint", conteoEndpoints);
+        reporte.put("ConteoPorMetodoYEndpoint", conteoPorMetodoYEndpoint);
         reporte.put("EndpointMasUsado", endpointMasUsado);
         reporte.put("EndpointMenosUsado", endpointMenosUsado);
+        reporte.put("ConteoTotalPorEndpoint", conteoTotalPorEndpoint);  // Conteo total para cada endpoint
 
         return reporte;
     }
@@ -151,9 +183,9 @@ public class ServicioProcesadorImpl implements IServicioProcesador {
     public Map<String, Object> generarReporteEstatusAplicacion() {
         List<String> logs = procesadorLog.lectorArchivoLog();
 
-        // Contar total de peticiones
+        // Contar peticiones procesadas, asegurándonos de que coincida con los logs que contienen tiempos de respuesta
         long totalPeticiones = logs.stream()
-                .filter(line -> line.contains("REQUEST"))
+                .filter(line -> line.contains("Tiempo de respuesta para el método"))
                 .count();
 
         // Contar total de errores
@@ -164,7 +196,20 @@ public class ServicioProcesadorImpl implements IServicioProcesador {
         // Filtrar y extraer los tiempos de respuesta
         List<Long> tiemposDeRespuesta = logs.stream()
                 .filter(line -> line.contains("Tiempo de respuesta"))  // Filtrar líneas con tiempos de respuesta
-                .map(line -> Long.parseLong(line.replaceAll("\\D+", "")))  // Extraer solo los números (milisegundos)
+                .map(line -> {
+                    try {
+                        // Extraer el tiempo de respuesta en milisegundos
+                        Pattern pattern = Pattern.compile("Tiempo de respuesta para el método .*: (\\d+) ms");
+                        Matcher matcher = pattern.matcher(line);
+                        if (matcher.find()) {
+                            return Long.parseLong(matcher.group(1));
+                        }
+                    } catch (NumberFormatException e) {
+                        // Ignorar si no se puede parsear el número
+                    }
+                    return 0L;
+                })
+                .filter(tiempo -> tiempo > 0)
                 .collect(Collectors.toList());
 
         // Calcular el tiempo promedio de respuesta
@@ -173,10 +218,11 @@ public class ServicioProcesadorImpl implements IServicioProcesador {
                 .average()
                 .orElse(0);
 
+        // Crear el reporte
         Map<String, Object> reporte = new HashMap<>();
         reporte.put("TotalPeticionesProcesadas", totalPeticiones);
         reporte.put("TotalErrores", totalErrores);
-        reporte.put("TiempoPromedioRespuesta", tiempoPromedioRespuesta);  // Añadir el tiempo promedio
+        reporte.put("TiempoPromedioRespuesta", tiempoPromedioRespuesta);
 
         return reporte;
     }
@@ -193,6 +239,7 @@ public class ServicioProcesadorImpl implements IServicioProcesador {
 
         long cantidadEventosCriticos = eventosCriticos.size();
 
+        // Asegúrate de que hay eventos críticos
         Map<String, Object> reporte = new HashMap<>();
         reporte.put("EventosCriticos", eventosCriticos);
         reporte.put("CantidadEventosCriticos", cantidadEventosCriticos);
@@ -200,11 +247,14 @@ public class ServicioProcesadorImpl implements IServicioProcesador {
         return reporte;
     }
 
-    // Método para identificar si el tiempo de respuesta es muy largo
     private boolean esTiempoRespuestaLargo(String line) {
         if (line.contains("Tiempo de respuesta")) {
-            long tiempo = Long.parseLong(line.replaceAll("\\D+", "")); // Extraer tiempo numérico
-            return tiempo > 5000; // Considerar tiempo mayor a 5000ms como crítico
+            try {
+                long tiempo = Long.parseLong(line.replaceAll("\\D+", "")); // Extraer tiempo numérico
+                return tiempo > 5000;  // Considerar tiempo mayor a 5000ms como crítico
+            } catch (NumberFormatException e) {
+                return false;  // Si no se puede convertir, no lo consideramos crítico
+            }
         }
         return false;
     }
